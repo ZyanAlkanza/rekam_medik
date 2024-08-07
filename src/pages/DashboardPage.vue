@@ -29,8 +29,8 @@
           <q-form @submit.prevent="submitForm" class="form-spacing">
             <q-input disable standout label="No Rekam Medik" />
             <div class="row justify-between">
-              <q-input class="col-6" standout v-model="newPatient.nama_pasien" label="Nama Pasien"
-                :rules="[val => !/\d/.test(val) || 'Name must not contain number', val => !!val || 'Field is required', val => val.length >= 3 || 'Name must contain atleast 3 characters']" />
+              <q-input class="col-6" standout v-model="newPatient.nama_pasien" label="Nama Pasien" autofocus
+                :rules="[val => !/\d/.test(val) || 'Name must not contain number', val => !!val || 'Field is required', val => val.length >= 3 || 'Name must contain at least 3 characters']" />
               <q-input class="col-6" standout v-model="newPatient.nik" label="NIK" mask="################"
                 :rules="[val => val.length === 16 || 'NIK must be 16 digits']" />
             </div>
@@ -53,11 +53,20 @@
           </q-card-section>
 
           <q-form @submit.prevent="submitFormKunjungan" class="form-spacing">
-            <q-select standout label="No Rekam Medik" v-model="selectedRekamMedik" :options="filteredRekamMedik"
-              @filter="filterRekamMedik" use-input fill-input input-debounce="0" hide-dropdown-icon clearable />
+            <q-select standout v-model="selectedNoRekamMedik" use-input input-debounce="0" label="No Rekam Medik"
+              :options="filteredOptions" @filter="filterFn" autofocus>
+              <template v-slot:no-option>
+                <q-item>
+                  <q-item-section class="text-grey">
+                    No results
+                  </q-item-section>
+                </q-item>
+              </template>
+            </q-select>
+
             <div class="row justify-between">
               <q-input disable class="col-6" standout v-model="newPatient.nama_pasien" label="Nama Pasien"
-                :rules="[val => !/\d/.test(val) || 'Name must not contain number', val => !!val || 'Field is required', val => val.length >= 3 || 'Name must contain atleast 3 characters']" />
+                :rules="[val => !/\d/.test(val) || 'Name must not contain number', val => !!val || 'Field is required', val => val.length >= 3 || 'Name must contain at least 3 characters']" />
               <q-input disable class="col-6" standout v-model="newPatient.nik" label="NIK" mask="################"
                 :rules="[val => val.length === 16 || 'NIK must be 16 digits']" />
             </div>
@@ -76,9 +85,9 @@
 </template>
 
 <script>
-import { Notify } from "quasar";
-import { api } from "src/boot/axios";
-import { defineComponent } from "vue";
+import { Notify } from 'quasar';
+import { api } from 'src/boot/axios';
+import { defineComponent, watch } from 'vue';
 
 export default defineComponent({
   name: 'DashboardPage',
@@ -101,30 +110,36 @@ export default defineComponent({
         nik: '',
         alamat: '',
       },
-    }
+      selectedNoRekamMedik: null,
+      options: [],
+      filteredOptions: []
+    };
   },
   methods: {
-    fetchPatiens() {
+    fetchPatients() {
       api.get('http://127.0.0.1:8000/api/index')
         .then(response => {
           this.patients = response.data.data;
+          this.options = response.data.data.map(patient => ({
+            label: patient.no_rekam_medik,
+            value: patient.no_rekam_medik
+          }));
+          this.filteredOptions = this.options;
         })
         .catch(error => {
-          console.log(error);
-
-        })
+          console.error('Error fetching patients:', error);
+        });
     },
     submitForm() {
       api.post('http://127.0.0.1:8000/api/add_patient', this.newPatient)
         .then(response => {
-          this.fetchPatiens();
+          this.fetchPatients();
           Notify.create({
             type: 'positive',
             message: 'Data added successfully!',
             position: 'top-right',
             timeout: 2500
-          })
-          console.log(response.data);
+          });
           this.newPatient = {
             nama_pasien: '',
             nik: '',
@@ -138,26 +153,83 @@ export default defineComponent({
             message: 'Failed! ' + error.response.data.message,
             position: 'top-right',
             timeout: 2500
-          })
+          });
+          console.error('Error adding patient:', error);
+        });
+    },
+    filterFn(val, update) {
+      if (val === '') {
+        update(() => {
+          this.filteredOptions = this.options;
+        });
+        return;
+      }
+
+      const needle = val.toLowerCase();
+      update(() => {
+        this.filteredOptions = this.options.filter(v => v.label.toLowerCase().indexOf(needle) > -1);
+      });
+    },
+    submitFormKunjungan() {
+      api.post('http://127.0.0.1:8000/api/make_visit', {
+        no_rekam_medik: this.selectedNoRekamMedik.value
+      })
+        .then(response => {
+          this.fetchPatients();
+          Notify.create({
+            type: 'positive',
+            message: 'Successfully!',
+            position: 'top-right',
+            timeout: 2500
+          });
+          this.ModalKunjungan = false;
+          setTimeout(() => {
+            this.selectedNoRekamMedik = null;
+            this.newPatient = {
+              nama_pasien: '',
+              nik: '',
+              alamat: '',
+            };
+          }, 500);
+        })
+        .catch(error => {
+          Notify.create({
+            type: 'negative',
+            message: 'Failed! ' + error.response.data.message,
+            position: 'top-right',
+            timeout: 2500
+          });
           console.log(error);
         })
     },
-    submitFormKunjungan() {
-      console.log('sukses');
+  },
+  watch: {
+    selectedNoRekamMedik(newVal) {
+      const selectedPatient = this.patients.find(patient => patient.no_rekam_medik === newVal.value);
+      console.log(newVal.value);
 
+
+      if (selectedPatient) {
+        this.newPatient = {
+          nama_pasien: selectedPatient.nama_pasien,
+          nik: selectedPatient.nik,
+          alamat: selectedPatient.alamat,
+        };
+      } else {
+        console.log('Patient not found for No Rekam Medik:', newVal);
+      }
     }
   },
-
   mounted() {
-    this.fetchPatiens();
+    this.fetchPatients();
   },
-
 });
 </script>
 
 <style scoped>
 .q-page {
   background-color: #0561ce;
+  padding: 80px;
 }
 
 .q-card {
